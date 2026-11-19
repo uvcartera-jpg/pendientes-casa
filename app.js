@@ -13,6 +13,33 @@ const TEMPLATES = {
   "Evento o visita":{cat:"Familia",money:"gasto",pts:["Fecha y hora","Presupuesto","Lista de compras","¿Quién se encarga de qué?"]}
 };
 const BUCKET = "respaldos";
+const CAT_COLORS = {"Casa":"#ff9f1c","Bebé":"#ff70a6","Finanzas":"#2ec4b6","Compras":"#4cc9f0","Ventas":"#ffc145","Trámites":"#b388eb","Salud":"#3ddc97","Auto":"#7b9cff","Familia":"#ff6b6b","Otros":"#c9a7ff"};
+const catColor = c=>CAT_COLORS[c]||"#c9a7ff";
+function hashStr(t){let h=2166136261;for(const ch of String(t))h=Math.imul(h^ch.charCodeAt(0),16777619);return h>>>0}
+function blobStyle(id){
+  let h=hashStr(id);const v=()=>{const x=36+(h%29);h=Math.imul(h,1103515245)+12345>>>0;return x};
+  const a=v(),b=v(),c=v(),d=v(),e=v(),f=v(),g=v(),k=v();
+  const tilt=((hashStr(id+"t")%31)-15)/10;
+  return `border-radius:${a}% ${100-a}% ${b}% ${100-b}% / ${c}% ${d}% ${100-d}% ${100-c}%;--tilt:${tilt}deg`;
+}
+function flowerSVG(total,done,pct){
+  const n=Math.min(Math.max(total,0),12);const on=total>12?Math.round(pct*12/100):done;
+  let petals="";
+  if(n===0){petals=`<circle cx="50" cy="50" r="22" class="petal off"/>`}
+  else{
+    const rx=n<=3?16:n<=6?13:n<=9?10:8;
+    for(let k=0;k<n;k++)petals+=`<g transform="rotate(${(360/n)*k} 50 50)"><ellipse class="petal ${k<on?"on":"off"}" cx="50" cy="27" rx="${rx}" ry="21"/></g>`;
+  }
+  return `<svg class="flower" viewBox="0 0 100 100" role="img" aria-label="${done} de ${total} resueltos">${petals}<circle class="core" cx="50" cy="50" r="17"/><text class="pct" x="50" y="51">${total?pct+"%":"+"}</text></svg>`;
+}
+function petalBurst(color){
+  if(window.matchMedia&&matchMedia("(prefers-reduced-motion: reduce)").matches)return;
+  const box=document.createElement("div");box.className="petal-burst";
+  const cols=[color,"#ff70a6","#ffc145","#4cc9f0","#3ddc97","#b388eb"];
+  for(let k=0;k<40;k++){const i=document.createElement("i");i.style.left=(Math.random()*100)+"vw";i.style.background=cols[k%cols.length];i.style.animationDelay=(Math.random()*.8)+"s";i.style.animationDuration=(2+Math.random()*1.5)+"s";box.append(i)}
+  document.body.append(box);setTimeout(()=>box.remove(),4000);
+}
+function checkBloom(cid){const p=prog(cid);if(p.total&&p.done===p.total){petalBurst(catColor((S.cases.get(cid)||{}).cat));toast("¡Caso completo! Floreció 🌸")}}
 
 // ---------- State ----------
 let sb=null, me=null, myUser="";
@@ -132,7 +159,9 @@ function fileHTML(f){
 function renderWho(){
   const w=$("#who");w.textContent="";
   if(!me)return;
-  const s=document.createElement("span");s.textContent="Estás como "+nameOf(me);
+  const g=$("#greet");g.textContent="Hola, "+nameOf(me);
+  g.insertAdjacentHTML("beforeend",'<svg viewBox="0 0 260 16" preserveAspectRatio="none" aria-hidden="true"><path d="M2 10 C 30 2, 50 16, 80 8 S 130 2, 160 9 S 220 15, 258 6" fill="none" stroke="#ff70a6" stroke-width="5" stroke-linecap="round"/></svg>');
+  const s=document.createElement("span");s.textContent="";
   const b=document.createElement("button");b.className="btn ghost sm";b.textContent="Nombre";b.type="button";b.onclick=()=>{UI.forceName=true;renderBanner()};
   const o=document.createElement("button");o.className="btn ghost sm";o.textContent="Salir";o.type="button";o.onclick=async()=>{await sb.auth.signOut();location.reload()};
   w.append(s,b,o);
@@ -155,7 +184,7 @@ function renderStats(){
   let ing=0,gas=0;open.forEach(c=>{if(c.amount){if(c.money_type==="ingreso")ing+=+c.amount;else if(c.money_type==="gasto")gas+=+c.amount}});
   const done=all.filter(i=>i.done).length;const pct=all.length?Math.round(done*100/all.length):0;
   $("#stats").innerHTML=`
-   <button class="stat hot" data-go="metoca"><div class="n">${mine}</div><div class="l">Puntos que me tocan</div></button>
+   <button class="stat" data-go="metoca"><div class="n">${mine}</div><div class="l">Puntos que me tocan</div></button>
    <button class="stat" data-go="nuevos"><div class="n">${news}</div><div class="l">Casos con novedades</div></button>
    <button class="stat" data-go="activos"><div class="n">${noAns}</div><div class="l">Puntos sin respuesta</div></button>
    <button class="stat ${overdue?"bad":""}" data-go="activos"><div class="n">${overdue}</div><div class="l">Casos vencidos</div></button>
@@ -186,23 +215,20 @@ function renderGrid(){
   }
   g.innerHTML=list.map(c=>{
     const p=prog(c.id);const d=dueInfo(c.due,c.status==="cerrado");const mine=itemsOf(c.id).filter(isMine).length;const pending=p.total-p.done;
-    return`<button class="card" data-open="${esc(c.id)}">
-      <span class="stripe" style="background:${PRIOS[c.prio]?PRIOS[c.prio].c:"var(--line)"}"></span>
-      ${c.cover?`<img class="cover" src="${esc(urlOf(c.cover))}" alt="" loading="lazy">`:""}
-      <div class="body">
-        <div class="chips">
-          ${hasNews(c)?`<span class="chip new">Novedades</span>`:""}
-          ${c.status==="cerrado"?`<span class="chip good">Cerrado</span>`:""}
-          <span class="chip">${esc(c.cat||"Otros")}</span>
-          ${d?`<span class="chip ${d.cls}">${esc(d.txt)}</span>`:""}
-          ${mine?`<span class="chip me">${mine} me toca${mine>1?"n":""}</span>`:""}
-        </div>
-        <h3>${esc(c.title)}</h3>
-        ${c.amount?`<div class="note">${c.money_type==="ingreso"?"Ingreso":"Gasto"}: ${fmtMoney(c.amount)}</div>`:""}
-        <div class="bar" aria-hidden="true"><i style="width:${p.pct}%"></i></div>
-        <div class="progress-l"><span>${p.total?p.done+" de "+p.total+" resueltos":"Sin puntos todavía"}</span><span>${pending?"Faltan "+pending:p.total?"Listo":""}</span></div>
-        <div class="note">Actualizado ${esc(fmtWhen(c.updated_at))} por ${esc(nameOf(c.updated_by))}</div>
-      </div></button>`;
+    return`<button class="card ${c.status==="cerrado"?"closed":""}" data-open="${esc(c.id)}" style="--c:${catColor(c.cat)};${blobStyle(c.id)}">
+      <div class="head">${flowerSVG(p.total,p.done,p.pct)}${c.cover?`<img class="photo" src="${esc(urlOf(c.cover))}" alt="" loading="lazy">`:""}</div>
+      <div class="chips">
+        <span class="chip cat">${esc(c.cat||"Otros")}</span>
+        ${hasNews(c)?`<span class="chip new">Novedades</span>`:""}
+        ${c.status==="cerrado"?`<span class="chip good">Cerrado</span>`:""}
+        ${d?`<span class="chip ${d.cls}">${esc(d.txt)}</span>`:""}
+        ${mine?`<span class="chip me">${mine} me toca${mine>1?"n":""}</span>`:""}
+      </div>
+      <h3>${esc(c.title)}</h3>
+      <div class="progress-l"><span>${p.total?p.done+" de "+p.total+" resueltos":"Sin puntos todavía"}</span><span>${pending?"Faltan "+pending:p.total?"Listo":""}</span></div>
+      ${c.amount?`<div class="meta">${c.money_type==="ingreso"?"Ingreso":"Gasto"}: ${fmtMoney(c.amount)}</div>`:""}
+      <div class="meta">${esc(fmtWhen(c.updated_at))} · ${esc(nameOf(c.updated_by))}</div>
+    </button>`;
   }).join("");
   g.querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>openCase(b.dataset.open));
 }
@@ -233,6 +259,7 @@ function renderModal(){
   if(UI.view==="form")return;
   const c=S.cases.get(UI.openCase);
   if(!c){if(UI.openCase){$("#modal").innerHTML=`<button class="close" data-x>✕</button><div class="msec">Este caso ya no existe.</div>`;$("#modal [data-x]").onclick=closeModal}return}
+  $("#modal").style.setProperty("--c",catColor(c.cat));
   preserveFocus(()=>{$("#modal").innerHTML=caseHTML(c);bindCase(c)});
 }
 function pointHTML(i){
@@ -264,27 +291,29 @@ function caseHTML(c){
   const its=itemsOf(c.id);const p=prog(c.id);const d=dueInfo(c.due,c.status==="cerrado");
   const pend=its.filter(i=>!i.done),done=its.filter(i=>i.done);const closed=c.status==="cerrado";
   return`<button class="close" data-x aria-label="Cerrar ventana">✕</button>
-  <div class="mhead">${c.cover?`<img class="cover" src="${esc(urlOf(c.cover))}" data-zoom="1" alt="Foto del caso">`:""}</div>
-  <div class="mtitle">
-    <div class="chips">
-      <span class="chip">${esc(c.cat||"Otros")}</span>
-      <span class="chip" style="border-color:${PRIOS[c.prio]?PRIOS[c.prio].c:"var(--line)"}">${esc(PRIOS[c.prio]?PRIOS[c.prio].l:"Normal")}</span>
-      ${d?`<span class="chip ${d.cls}">${esc(d.txt)}</span>`:""}
-      ${closed?`<span class="chip good">Cerrado ${esc(fmtWhen(c.closed_at))}</span>`:""}
+  <div class="mhero">
+    ${flowerSVG(p.total,p.done,p.pct)}
+    <div style="display:grid;gap:8px">
+      <div class="chips">
+        <span class="chip cat">${esc(c.cat||"Otros")}</span>
+        <span class="chip">${esc(PRIOS[c.prio]?PRIOS[c.prio].l:"Normal")}</span>
+        ${d?`<span class="chip ${d.cls}">${esc(d.txt)}</span>`:""}
+        ${closed?`<span class="chip good">Cerrado ${esc(fmtWhen(c.closed_at))}</span>`:""}
+      </div>
+      <h2>${esc(c.title)}</h2>
+      <div class="progress-text">${p.done} de ${p.total} puntos resueltos${pend.length?" · falta"+(pend.length>1?"n ":" ")+pend.length:p.total?" · todo listo":""}</div>
     </div>
-    <h2>${esc(c.title)}</h2>
+    ${c.cover?`<img class="photo" src="${esc(urlOf(c.cover))}" data-zoom="1" alt="Foto del caso">`:""}
+  </div>
+  <div class="msec">
     <div class="note">Creado por ${esc(nameOf(c.created_by))} ${esc(fmtWhen(c.created_at))}</div>
-    ${c.descr?`<div class="desc">${esc(c.descr)}</div>`:""}
-    ${c.amount||c.money_note?`<div class="money">${c.amount?`<span>${c.money_type==="ingreso"?"Ingreso esperado":"Gasto estimado"}: <b>${fmtMoney(c.amount)}</b></span>`:""}${c.money_note?`<span>Destino / origen: <b>${esc(c.money_note)}</b></span>`:""}</div>`:""}
+    ${c.descr?`<div class="desc" style="margin-top:6px">${esc(c.descr)}</div>`:""}
+    ${c.amount||c.money_note?`<div class="money" style="margin-top:8px">${c.amount?`<span>${c.money_type==="ingreso"?"Ingreso esperado":"Gasto estimado"}: <b>${fmtMoney(c.amount)}</b></span>`:""}${c.money_note?`<span>Destino / origen: <b>${esc(c.money_note)}</b></span>`:""}</div>`:""}
+    ${!closed&&p.total&&!pend.length?`<div class="closebox">Todo está resuelto. ¿Cerramos el caso? <button class="btn primary sm" data-closecase type="button">Cerrar caso</button></div>`:""}
+    ${closed&&c.result?`<div class="closebox"><span><b>Resultado:</b> ${esc(c.result)}</span></div>`:""}
   </div>
   <div class="msec">
-    <div class="bigprog"><span class="pct">${p.pct}%</span><div class="bar"><i style="width:${p.pct}%"></i></div></div>
-    <div class="progress-l" style="margin-top:6px"><span>${p.done} de ${p.total} puntos resueltos</span><span>${pend.length?"Falta"+(pend.length>1?"n ":" ")+pend.length:p.total?"Todo resuelto":""}</span></div>
-    ${!closed&&p.total&&!pend.length?`<div class="banner">Todo está resuelto. ¿Cerramos el caso? <button class="btn primary sm" data-closecase type="button">Cerrar caso</button></div>`:""}
-    ${closed&&c.result?`<div class="banner"><b>Resultado:</b> ${esc(c.result)}</div>`:""}
-  </div>
-  <div class="msec">
-    <h3>Lo que falta <span class="note">${pend.length}</span></h3>
+    <h3>Lo que falta <span class="count">${pend.length}</span></h3>
     ${pend.length?pend.map(pointHTML).join(""):`<div class="note">Nada pendiente.</div>`}
     ${done.length?`<details class="donelist" ${pend.length?"":"open"}><summary>Resueltos (${done.length})</summary>${done.map(pointHTML).join("")}</details>`:""}
   </div>
@@ -318,7 +347,7 @@ function bindCase(c){
   m.querySelectorAll("[data-draft]").forEach(el=>el.oninput=()=>{UI.drafts[el.id]=el.value});
   m.querySelectorAll("[data-toggle]").forEach(cb=>cb.onchange=async()=>{
     const i=S.items.get(cb.dataset.toggle);if(!i)return;const v=cb.checked;
-    i.done=v;i.done_by=v?me:null;i.done_at=v?now():0;renderModal();
+    i.done=v;i.done_by=v?me:null;i.done_at=v?now():0;renderModal();if(v)checkBloom(c.id);
     await run(sb.from("puntos").update(v?{done:true,done_by:me,done_at:new Date().toISOString()}:{done:false,done_by:null,done_at:null}).eq("id",i.id));
     await touchCase(c.id,(v?"marcó resuelto: ":"reabrió: ")+i.text);
   });
@@ -339,7 +368,7 @@ function bindCase(c){
     const i=S.items.get(id);if(!i)return;const tid="rep-"+id;const text=(UI.drafts[tid]||"").trim();const files=UI.pending[id]||[];
     if(!text&&!files.length&&!markDone){toast("Escribe algo o adjunta un respaldo.");return}
     if(text||files.length)await run(sb.from("respuestas").insert({punto_id:id,caso_id:c.id,text,files}));
-    if(markDone)await run(sb.from("puntos").update({done:true,done_by:me,done_at:new Date().toISOString()}).eq("id",id));
+    if(markDone){await run(sb.from("puntos").update({done:true,done_by:me,done_at:new Date().toISOString()}).eq("id",id));i.done=true;checkBloom(c.id)}
     UI.composers.delete(id);delete UI.pending[id];delete UI.drafts[tid];
     await touchCase(c.id,(markDone?"respondió y resolvió: ":"respondió en: ")+i.text);
   };
@@ -398,6 +427,7 @@ function copySummary(c){
 // ---------- New / edit form ----------
 function openForm(editId,title){
   UI.view="form";UI.editId=editId||null;UI.tpl=null;
+  $("#modal").style.setProperty("--c",editId&&S.cases.get(editId)?catColor(S.cases.get(editId).cat):"#b388eb");
   const c=editId?S.cases.get(editId):null;
   $("#overlay").hidden=false;
   const tplBtns=Object.keys(TEMPLATES).map(k=>`<button type="button" data-tpl="${esc(k)}" aria-pressed="false">${esc(k)}</button>`).join("");
@@ -422,14 +452,15 @@ function openForm(editId,title){
     <label for="fPhoto">Foto ${c&&c.cover?"(se reemplaza la actual)":"(opcional)"}<input type="file" id="fPhoto" accept="image/*"></label>
     ${c?"":`<label for="fPts">Puntos a resolver (uno por línea)<textarea id="fPts" rows="5" placeholder="Definir precio&#10;Fecha de venta&#10;¿En qué usamos el dinero?"></textarea></label>
     <label for="fAs">Los puntos le tocan a<select id="fAs">${memberOptions("")}</select></label>`}
-    <div class="actions"><button class="btn primary" type="submit" id="fSave">${c?"Guardar cambios":"Crear caso"}</button><button class="btn ghost" type="button" data-x>Cancelar</button></div>
+    <div class="actions"><button class="btn primary" type="submit" id="fSave">${c?"Guardar cambios":"Plantar caso"}</button><button class="btn ghost" type="button" data-x>Cancelar</button></div>
   </form>`;
   $("#modal").querySelectorAll("[data-x]").forEach(b=>b.onclick=()=>{if(c){UI.view="case";renderModal()}else closeModal()});
   $("#modal").querySelectorAll("[data-tpl]").forEach(b=>b.onclick=()=>{
     const k=b.dataset.tpl;const on=UI.tpl!==k;UI.tpl=on?k:null;
     $("#modal").querySelectorAll("[data-tpl]").forEach(x=>x.setAttribute("aria-pressed",String(x.dataset.tpl===UI.tpl)));
-    if(on){const t=TEMPLATES[k];$("#fPts").value=t.pts.join("\n");$("#fCat").value=t.cat;$("#fMoneyType").value=t.money}
+    if(on){const t=TEMPLATES[k];$("#fPts").value=t.pts.join("\n");$("#fCat").value=t.cat;$("#fMoneyType").value=t.money;$("#modal").style.setProperty("--c",catColor(t.cat))}
   });
+  const fc=$("#fCat");fc.onchange=()=>$("#modal").style.setProperty("--c",catColor(fc.value));
   $("#fTitle").focus();
   $("#caseForm").onsubmit=async e=>{
     e.preventDefault();const btn=$("#fSave");btn.disabled=true;btn.textContent="Guardando…";
