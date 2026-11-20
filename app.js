@@ -163,6 +163,9 @@ function renderWho(){
   g.insertAdjacentHTML("beforeend",'<svg viewBox="0 0 260 16" preserveAspectRatio="none" aria-hidden="true"><path d="M2 10 C 30 2, 50 16, 80 8 S 130 2, 160 9 S 220 15, 258 6" fill="none" stroke="#ff70a6" stroke-width="5" stroke-linecap="round"/></svg>');
   const s=document.createElement("span");s.textContent="";
   const b=document.createElement("button");b.className="btn ghost sm";b.textContent="Nombre";b.type="button";b.onclick=()=>{UI.forceName=true;renderBanner()};
+  const nb=document.createElement("button");nb.className="btn sm";nb.type="button";
+  const mm=S.members.get(me)||{};nb.textContent=mm.ntfy_topic?"🔔 Avisos activos":"🔔 Activar avisos";nb.onclick=openNotif;
+  w.append(nb);
   const o=document.createElement("button");o.className="btn ghost sm";o.textContent="Salir";o.type="button";o.onclick=async()=>{await sb.auth.signOut();location.reload()};
   w.append(s,b,o);
 }
@@ -256,7 +259,7 @@ function preserveFocus(fn){
   if(id){const el=document.getElementById(id);if(el){el.focus();try{if(st!=null)el.setSelectionRange(st,en)}catch(e){}}}
 }
 function renderModal(){
-  if(UI.view==="form")return;
+  if(UI.view==="form"||UI.view==="notif")return;
   const c=S.cases.get(UI.openCase);
   if(!c){if(UI.openCase){$("#modal").innerHTML=`<button class="close" data-x>✕</button><div class="msec">Este caso ya no existe.</div>`;$("#modal [data-x]").onclick=closeModal}return}
   $("#modal").style.setProperty("--c",catColor(c.cat));
@@ -484,6 +487,49 @@ function openForm(editId,title){
         openCase(id);
       }
     }catch(err){toast(err.message||"No se pudo guardar.");btn.disabled=false;btn.textContent="Reintentar"}
+  };
+}
+
+// ---------- Notificaciones (ntfy) ----------
+const APP_URL="https://uvcartera-jpg.github.io/pendientes-casa/";
+function otherName(){const ids=[...S.members.keys()].filter(id=>id!==me);return ids.length?nameOf(ids[0]):"tu pareja"}
+function openNotif(){UI.view="notif";$("#overlay").hidden=false;$("#modal").style.setProperty("--c","#ffc145");drawNotif()}
+function drawNotif(){
+  const t=(S.members.get(me)||{}).ntfy_topic||"";
+  $("#modal").innerHTML=`<button class="close" data-x aria-label="Cerrar ventana">✕</button>
+  <div class="form">
+    <h2>Avisos al celular</h2>
+    <div>Te llega una notificación cuando <b>${esc(otherName())}</b> crea un caso, agrega puntos, responde o marca algo, y una especial cuando un caso se completa. Tus propios cambios no te avisan.</div>
+    ${t?`<ol class="steps">
+      <li>Instala la app <b>ntfy</b> (App Store o Play Store).</li>
+      <li>Ábrela, toca <b>+</b> y pega este canal en <i>Topic name</i>:</li>
+    </ol>
+    <div class="topic" id="topicTxt">${esc(t)}</div>
+    <div class="actions"><button class="btn primary sm" type="button" data-copytopic>Copiar canal</button><button class="btn sm" type="button" data-test>Enviar prueba</button></div>
+    <ol class="steps" start="3"><li>Toca <b>Subscribe</b>. Si te pide permiso para notificaciones, acepta.</li><li>Toca <b>Enviar prueba</b>: te debería llegar un aviso en segundos.</li></ol>
+    <div class="note">El canal es privado y solo tuyo; no lo compartas.</div>
+    <div class="actions"><button class="btn ghost sm danger" type="button" data-off>Desactivar avisos</button></div>`
+    :`<div class="actions"><button class="btn primary" type="button" data-on>Activar avisos en este teléfono</button></div>`}
+  </div>`;
+  const m=$("#modal");
+  m.querySelectorAll("[data-x]").forEach(b=>b.onclick=closeModal);
+  const on=m.querySelector("[data-on]");if(on)on.onclick=async()=>{
+    const a=new Uint8Array(12);crypto.getRandomValues(a);const topic="pcasa-"+[...a].map(x=>(x%36).toString(36)).join("");
+    await run(sb.from("miembros").upsert({id:me,alias:(S.members.get(me)||{}).alias||myUser,ntfy_topic:topic}));
+    S.members.set(me,Object.assign({},S.members.get(me)||{},{ntfy_topic:topic}));drawNotif();renderWho();
+  };
+  const off=m.querySelector("[data-off]");if(off)off.onclick=async()=>{
+    await run(sb.from("miembros").update({ntfy_topic:null}).eq("id",me));
+    S.members.set(me,Object.assign({},S.members.get(me)||{},{ntfy_topic:null}));drawNotif();renderWho();toast("Avisos desactivados.");
+  };
+  const cp=m.querySelector("[data-copytopic]");if(cp)cp.onclick=()=>{
+    const done=()=>toast("Canal copiado. Pégalo en ntfy.");
+    const fb=()=>{const r=document.createRange();r.selectNodeContents($("#topicTxt"));const sel=getSelection();sel.removeAllRanges();sel.addRange(r);try{document.execCommand("copy");done()}catch(e){toast("Mantén presionado el canal para copiarlo.")}};
+    if(navigator.clipboard&&navigator.clipboard.writeText)navigator.clipboard.writeText(t).then(done,fb);else fb();
+  };
+  const ts=m.querySelector("[data-test]");if(ts)ts.onclick=async()=>{
+    try{await fetch("https://ntfy.sh",{method:"POST",body:JSON.stringify({topic:t,title:"Pendientes de Casa",message:"¡Listo! Los avisos funcionan 🌸",tags:["blossom"],click:APP_URL})});toast("Prueba enviada. Revisa tu celular.")}
+    catch(e){toast("No se pudo enviar la prueba. Revisa tu internet.")}
   };
 }
 
